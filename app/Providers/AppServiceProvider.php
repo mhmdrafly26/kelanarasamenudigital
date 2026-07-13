@@ -2,7 +2,14 @@
 
 namespace App\Providers;
 
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
+use App\Models\Category;
+use App\Models\Transaksi;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -19,47 +26,41 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Trust Proxies (Penting untuk Localtunnel)
-        \Illuminate\Support\Facades\Request::setTrustedProxies(
-            ['*'], 
-            \Illuminate\Http\Request::HEADER_X_FORWARDED_FOR | 
-            \Illuminate\Http\Request::HEADER_X_FORWARDED_HOST | 
-            \Illuminate\Http\Request::HEADER_X_FORWARDED_PORT | 
-            \Illuminate\Http\Request::HEADER_X_FORWARDED_PROTO
-        );
+        // Paksa HTTPS di production
+        if (app()->isProduction()) {
+            URL::forceScheme('https');
+        }
 
-        // Only execute database-related bootstrap if not running in CLI/console (prevents build crashes)
+        // Jangan jalankan bootstrap database saat console/build
         if (!app()->runningInConsole()) {
-            // Auto-run migrations and force HTTPS in production
-            if (config('app.env') === 'production') {
-                \Illuminate\Support\Facades\URL::forceScheme('https');
+            try {
+                if (app()->isProduction()) {
 
-                try {
-                    if (!\Illuminate\Support\Facades\Schema::hasTable('migrations')) {
-                        \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true]);
+                    if (!Schema::hasTable('migrations')) {
+                        Artisan::call('migrate', ['--force' => true]);
                     }
 
-                    // Auto-seed if the database has no categories
-                    if (\Illuminate\Support\Facades\Schema::hasTable('categories') && \App\Models\Category::count() === 0) {
-                        \Illuminate\Support\Facades\Artisan::call('db:seed', ['--force' => true]);
+                    if (Schema::hasTable('categories') && Category::count() === 0) {
+                        Artisan::call('db:seed', ['--force' => true]);
                     }
 
-                    // Auto-link storage if link doesn't exist
                     if (!file_exists(public_path('storage'))) {
-                        \Illuminate\Support\Facades\Artisan::call('storage:link');
+                        Artisan::call('storage:link');
                     }
-                } catch (\Exception $e) {
-                    \Illuminate\Support\Facades\Log::error('Auto-migration/seeding/linking failed: ' . $e->getMessage());
                 }
+            } catch (\Throwable $e) {
+                Log::error($e->getMessage());
             }
 
-            // Share pending orders count to sidebar safely
             try {
-                if (\Illuminate\Support\Facades\Schema::hasTable('transaksis')) {
-                    \Illuminate\Support\Facades\View::share('pendingOrdersCount', \App\Models\Transaksi::where('status', 'pending')->count());
+                if (Schema::hasTable('transaksis')) {
+                    View::share(
+                        'pendingOrdersCount',
+                        Transaksi::where('status', 'pending')->count()
+                    );
                 }
-            } catch (\Exception $e) {
-                \Illuminate\Support\Facades\Log::warning('Could not share pendingOrdersCount: ' . $e->getMessage());
+            } catch (\Throwable $e) {
+                Log::warning($e->getMessage());
             }
         }
     }
